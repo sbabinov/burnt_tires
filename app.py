@@ -36,7 +36,12 @@ async def on_startup(dp):
                     id INT,
                     type INT,
                     members TEXT,
-                    race_circuit INT)""")
+                    race_circuit INT,
+                    voted_users TEXT,
+                    laps INT,
+                    weather TEXT,
+                    current_element_index INT,
+                    pitstops INT)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS race_circuits (
                     id INT,
@@ -71,7 +76,17 @@ async def on_startup(dp):
                     shocks INT,
                     frame INT,
                     weight INT,
-                    tires TEXT)""")
+                    tires TEXT,
+                    driving_exp INT)""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS cars_body_state (
+                    user_id INT,
+                    car_id INT,
+                    front INT,
+                    rear INT,
+                    roof INT,
+                    right_side INT,
+                    left_side INT)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS current_user_message (
                     user_id INT,

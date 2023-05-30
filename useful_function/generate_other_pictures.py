@@ -41,6 +41,8 @@ async def generate_user_profile_photo(user_id: int):
     frame.thumbnail((size[0] + 2, size[1] + 2))
 
     avatar.alpha_composite(frame, (-1, -1))
+    os.remove(path)
+
     return avatar
 
 

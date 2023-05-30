@@ -49,7 +49,6 @@ async def get_username(message: types.Message, state: FSMContext):
 
     await state.finish()
     await message.answer("Поздравляем! Вы успешно зарегистрировались!")
-    await MainState.main_state.set()
 
 
 @dp.message_handler(text="/car")

@@ -148,7 +148,53 @@ def generate_album_photo(user_id, brand_id: int, cars: list, choose_car_index: i
     return save_path
 
 
-def generate_card_picture(user_id, car_id, backside=False):
+def generate_car_state_picture(user_id, car_id, size):
+    data = cursor.execute("SELECT * FROM cars_body_state WHERE (user_id, car_id) = (?, ?)",
+                          (user_id, car_id)).fetchone()[2:]
+    body_parts = ['front', 'rear', 'roof', 'right_side', 'left_side']
+
+    main_image = Image.open(os.path.join(f'images/car_states/body/full.png')).convert(mode='RGBA')
+    main_image.thumbnail((size, size))
+
+    for part_index in range(len(body_parts)):
+        part_state = data[part_index]
+        if part_state > 20:
+            part_state = part_state - 20
+        if part_state < 90:
+            part_image = \
+                Image.open(os.path.join(f'images/car_states/body/{body_parts[part_index]}.png')).convert(mode='RGBA')
+            part_image.thumbnail((size, size))
+
+            default_color_value = [255, 0]
+            for i in range(part_state):
+                if default_color_value[1] >= 255:
+                    default_color_value[0] -= 255 / 50
+                else:
+                    default_color_value[1] += 255 / 50
+
+            color = [int(default_color_value[0]), int(default_color_value[1]), 0, 255]
+            if part_state == 0:
+                color = [0, 0, 0, 255]
+
+            new_image = []
+            for pixel in part_image.getdata():
+                if pixel[-1] > 0:
+                    color = list(color)
+                    color[-1] = pixel[-1]
+                    color = tuple(color)
+                    new_image.append(color)
+                else:
+                    new_image.append((0, 0, 0, 0))
+
+            part_image = Image.new(part_image.mode, part_image.size)
+            part_image.putdata(new_image)
+
+            main_image.alpha_composite(part_image)
+
+    return main_image
+
+
+def generate_card_picture(user_id, car_id, backside=False, path=None, tires=None):
     # информация об автомобиле
     car_brand_id = cursor.execute("SELECT car_brand FROM cars WHERE id = ?", (car_id,)).fetchone()[0]
     car_brand = cars_brands[car_brand_id]
@@ -174,7 +220,6 @@ def generate_card_picture(user_id, car_id, backside=False):
     car_country = 'Italia'
 
     # изображение карточки
-    card_picture = Image.open(os.path.join(f'images/design/car_cards/1.jpg')).convert(mode='RGBA')
     if car_rarity != 'legendary':
         card_picture = Image.new('RGBA', (952, 1280), colors[car_rarity])
     else:
@@ -183,15 +228,20 @@ def generate_card_picture(user_id, car_id, backside=False):
     idraw = ImageDraw.Draw(card_picture)
 
     # изображение на карточке
-    on_card_picture = Image.open(os.path.join(f'images/design/car_cards/1.jpg')).convert(mode='RGBA')
+    if backside:
+        on_card_picture = Image.open(os.path.join(f'images/design/car_cards/backside.jpg')).convert(mode='RGBA')
+    else:
+        on_card_picture = Image.open(os.path.join(f'images/design/car_cards/1.jpg')).convert(mode='RGBA')
+
     on_card_picture = on_card_picture.resize((card_picture.width - 30, card_picture.height - 30))
     card_picture.alpha_composite(on_card_picture, (15, 15))
 
-    # серый слой
-    grey_layer = Image.open(os.path.join(f'images/design/car_cards/grey_layer.png')).convert(mode='RGBA')
-    grey_layer = grey_layer.resize((card_picture.width - 30, card_picture.height - 30))
+    if not backside:
+        # серый слой
+        grey_layer = Image.open(os.path.join(f'images/design/car_cards/grey_layer.png')).convert(mode='RGBA')
+        grey_layer = grey_layer.resize((card_picture.width - 30, card_picture.height - 30))
 
-    card_picture.alpha_composite(grey_layer, (15, 15))
+        card_picture.alpha_composite(grey_layer, (15, 15))
 
     # изображение автомобиля
     car_picture = Image.open(os.path.join(f'images/cars/{car_brand_id}/{car_id}.png'))
@@ -314,21 +364,68 @@ def generate_card_picture(user_id, car_id, backside=False):
         idraw.text((130, 820), 'Состояние', font=characteristics_small_font)
         idraw.text((130, 860), 'автомобиля:', font=characteristics_small_font)
 
-        car_state_image = Image.open('../images/car_states/body/full.png').convert(mode='RGBA')
-        car_state_image.thumbnail((220, 220))
-
+        car_state_image = generate_car_state_picture(user_id, car_id, 220)
         card_picture.alpha_composite(car_state_image, (330, 740))
 
         # добавление привода
         drive_unit_type = 'rwd'
 
-        drive_unit_image = Image.open('../images/cars_parts/drive_unit/drive_unit.png').convert(mode='RGBA')
-        drive_unit_image.thumbnail((220, 220))
+        drive_unit_image = Image.open('images/cars_parts/drive_unit/drive_unit.png').convert(mode='RGBA')
+        drive_unit_image.thumbnail((200, 200))
 
         card_picture.alpha_composite(drive_unit_image, (500, 650))
         idraw.text((565, 850), drive_unit_type.upper(), font=characteristics_big_font)
 
-    save_path = os.path.join(f'images/for_saves/{random.randint(100, 10000000)}.png')
+        # установленный комлект шин
+        if tires:
+            tires_image = Image.open(os.path.join(f'images/cars_parts/tires/{tires[0]}.png')).convert(mode='RGBA')
+            tires_image.thumbnail((150, 150))
+
+            logo = Image.open(os.path.join(f'images/cars_parts/tires/logos/{tires[0]}.png')).convert(mode='RGBA')
+            logo.thumbnail((75, 75))
+
+            center_pos_x = 165
+            center_pos_y = 675
+
+            t_pos_x = center_pos_x - tires_image.width // 2
+            t_pos_y = center_pos_y - tires_image.height // 2
+            card_picture.alpha_composite(tires_image, (t_pos_x, t_pos_y))
+
+            pos_x = t_pos_x - logo.width // 2 + 5
+            pos_y = center_pos_y - logo.height // 2
+            card_picture.alpha_composite(logo, (pos_x, pos_y))
+
+            pos_x = t_pos_x + tires_image.width + 20
+            pos_y = t_pos_y + 20
+
+            caption_font = get_fonts('blogger_sans.ttf', 35)[0]
+
+            idraw.text((pos_x, pos_y), 'Состояние:', font=caption_font, stroke_width=4, stroke_fill='black')
+
+            default_color_value = [255, 0]
+            for i in range(int(tires[1])):
+                if default_color_value[1] >= 255:
+                    default_color_value[0] -= 255 / 50
+                else:
+                    default_color_value[1] += 255 / 50
+
+            color = (int(default_color_value[0]), int(default_color_value[1]), 0, 255)
+            if tires[1] == 0:
+                color = (0, 0, 0, 255)
+
+            text = f'{tires[1]} %'
+            idraw.text((pos_x + 10, pos_y + 40), text, font=caption_font, fill=color,
+                       stroke_fill='black', stroke_width=4)
+
+
+            # pos_x = 15 + 5
+            # pos_y = card_picture.height - 15 - logo.height - 5
+
+    if path is None:
+        save_path = os.path.join(f'images/for_saves/{random.randint(100, 10000000)}.png')
+    else:
+        save_path = path
+
     card_picture.save(save_path)
     card_picture.close()
 
@@ -764,16 +861,6 @@ def generate_brand_image(brand_id: int):
 
 
 def generate_tires_card_image(tires: str, wear: int):
-    tires_characteristics = {
-        'soft': [80, 20, 30, 15],
-        'medium': [65, 30, 50, 20],
-        'hard': [50, 40, 70, 25],
-        'rain': [35, 80, 70, 20],
-        'rally': [35, 35, 80, 70],
-        'off_road': [20, 25, 90, 90],
-        'drag': [90, 10, 20, 10]
-    }
-
     # изображение карточки
     card_image = Image.open(os.path.join(f'images/cars_parts/tires/{tires}.jpg')).convert(mode='RGBA')
     card_image.thumbnail((1000, 1000))
