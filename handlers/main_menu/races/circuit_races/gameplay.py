@@ -9,24 +9,34 @@ from inline_keyboards import RaceInlineKeyboard
 from useful_function.generate_race_pictures import *
 from useful_function.generate_other_pictures import *
 from .game import *
-from .events import do_overtaking
+from .events import do_overtaking, uncontrollable_skid
 from useful_function.calculating import *
 from useful_function.for_cars import *
+from useful_function.randomizer import *
+
 
 user_readiness = dict()
 choosen_cars = dict()
 choosen_car_ids = dict()
 priority_dices = dict()
+event_bonuses = dict()
 users_score = dict()
 users_dices = dict()
 
 
 async def waiting_players(user_id, race_id):
     global user_readiness
-    user_readiness[race_id][user_id] = 1
     while not all(user_readiness[race_id].values()):
+        user_readiness[race_id][user_id] = 1
         await asyncio.sleep(0.1)
     return True
+
+
+def set_players_readiness(race_id: int, readiness: int):
+    global user_readiness
+    users = list(user_readiness[race_id].keys())
+    for user_id in users:
+        user_readiness[race_id][user_id] = readiness
 
 
 async def set_up_global_variables(race_id):
@@ -52,13 +62,19 @@ async def play_race(user_id, race_id):
     global priority_dices
     global users_score
     global users_dices
+    global event_bonuses
 
     users_score[race_id] = dict()
     users_dices[race_id] = dict()
+    event_bonuses[race_id] = dict()
+
+    user_readiness[race_id][user_id] = 0
 
     circuit_id = cursor.execute("SELECT race_circuit FROM races WHERE id = ?", (race_id,)).fetchone()[0]
     race_map = cursor.execute("SELECT elements FROM race_circuits WHERE id = ?", (circuit_id,)).fetchone()[0].split('_')
     race_map = [0] + race_map
+
+    main_username = cursor.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()[0]
 
     map_priority_dices = priority_dices.get(race_id, False)
     if not map_priority_dices:
@@ -175,6 +191,42 @@ async def play_race(user_id, race_id):
             tires[race_id][user_id][car_id][1] = \
                 change_tires_wear(tires[race_id][user_id][car_id], race_id, circuit_element)
 
+            driving_exp = cursor.execute("SELECT driving_exp FROM users_cars WHERE (user_id, car_id) = (?, ?)",
+                                         (user_id, car_id)).fetchone()[0] / 10
+            handling = calculate_characteristic_bar_length(car_id, 100, None, user_id)[2]
+            overall_handling = int(handling + driving_exp)
+
+            if overall_handling < 50:
+                event_chance = 20
+            elif 50 <= overall_handling < 60:
+                event_chance = 15
+            elif 70 <= overall_handling < 80:
+                event_chance = 13
+            else:
+                event_chance = 10
+
+            set_players_readiness(race_id, 0)
+            if get_result_by_chance(event_chance):
+                users = list(user_readiness[race_id].keys())
+                text = f"❗️ Игрок <b>{main_username}</b> попал в занос"
+                messages = []
+                for user in users:
+                    if user != user_id:
+                        msg_to_delete = await bot.send_message(user, text)
+                        messages.append(msg_to_delete)
+
+                event_bonus = await uncontrollable_skid(user_id, car_id)
+
+                msg_index = 0
+                for user in users:
+                    if user != user_id:
+                        await bot.delete_message(user, messages[msg_index].message_id)
+                        msg_index += 1
+            else:
+                event_bonus = 1
+
+            event_bonuses[race_id][user_id] = event_bonus
+
             msg = await msg.answer("⏳ Ждем остальных игроков...")
 
             if await waiting_players(user_id, race_id):
@@ -201,7 +253,7 @@ async def play_race(user_id, race_id):
                     else:
                         dice_bonus = 1
 
-                    event_bonus = 1
+                    event_bonus = event_bonuses[race_id][user]
 
                     if user == user_id:
                         score = int(characteristics_bonus * dice_bonus * event_bonus)
@@ -227,25 +279,26 @@ async def play_race(user_id, race_id):
 
                     all_user_score = sum(sc[0] for sc in users_score[race_id][user])
                     current_score = int(characteristics_bonus * dice_bonus * event_bonus)
-                    users_current_score[user] = [all_user_score, current_score]
+                    users_current_score[user] = [all_user_score - current_score, current_score]
 
             await msg.delete()
 
-            print(users_score[race_id])
+            set_players_readiness(race_id, 0)
             for user_1 in list(user_readiness[race_id].keys()):
                 for user_2 in list(user_readiness[race_id].keys()):
                     if user_1 != user_2:
-                        if users_current_score[user_1][0] - users_current_score[user_2][0] <= 15:
+                        if users_current_score[user_2][0] > users_current_score[user_1][0]:
                             theoretical_score_1 = users_current_score[user_1][0] + users_current_score[user_1][1]
                             theoretical_score_2 = users_current_score[user_2][0] + users_current_score[user_2][1]
-                            if theoretical_score_1 > theoretical_score_2:
+                            if 1 <= theoretical_score_1 - theoretical_score_2 <= 15:
                                 data = {
                                     user_1: choosen_car_ids[race_id][user_1],
                                     user_2: choosen_car_ids[race_id][user_2]
                                 }
-
-                                winner = await do_overtaking(race_id, user_id, data,
-                                                             [theoretical_score_1, theoretical_score_2])
+                                penalty = max(users_current_score[user_2][0], users_current_score[user_2][1]) // 4
+                                winner = await do_overtaking(race_id, user_id, data, [users_current_score[user_1][0],
+                                                                                      users_current_score[user_2][0]],
+                                                             penalty)
                                 if user_1 == user_id:
                                     if user_1 == winner:
                                         users_score[race_id][user_2].pop(-1)
@@ -303,6 +356,7 @@ async def command_game(message: Message):
             await choose_start_tires(user_id, race_id)
             await show_loading_window(user_id, race_id)
             generate_race_pictures(user_id, race_id)
+            await waiting_players(user_id, race_id)
             await play_race(user_id, race_id)
 
 

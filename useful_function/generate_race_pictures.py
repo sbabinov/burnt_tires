@@ -246,9 +246,12 @@ def generate_scoring_window(race_id: int, user_id: int, car_id: int, tires: str,
         else:
             if value < 1:
                 color = 'red'
+            elif value == 1:
+                color = 'white'
+                value = '-'
             else:
                 color = '#30BD03'
-            value = f'x{value}'
+            value = f'x{value}' if value != '-' else '-'
 
         pos_y += 50
         text_width = idraw.textsize(caption, font=caption_font)[0]
@@ -719,7 +722,8 @@ def generate_tires_for_race_choice_window(race_id, user_id, car_index, tires_ind
     background.alpha_composite(reversed_arrow, (pos_x_1, pos_y))
     background.alpha_composite(arrow, (pos_x_2, pos_y))
 
-    save_path = os.path.join(f'images/for_saves/races/{race_id}_{user_id}_start-tires.png')
+    save_path = os.path.join(f'images/for_saves/races/'
+                             f'{race_id}_{user_id}_{car_index}_{tires_index}_start-tires.png')
     background.save(save_path)
     background.close()
 

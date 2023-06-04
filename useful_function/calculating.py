@@ -4,12 +4,16 @@ from objects_data import *
 from loader import cursor
 
 
-def calculate_characteristic_bar_length(car_id, full_bar_length, identified_improvements: list):
+def calculate_characteristic_bar_length(car_id, full_bar_length, identified_improvements: list = None, user_id=None):
     max_speed = int(cursor.execute("SELECT max_speed FROM cars WHERE id = ?", (car_id,)).fetchone()[0])
     acceleration_time = float(cursor.execute("SELECT acceleration_time FROM cars WHERE id = ?",
                                              (car_id,)).fetchone()[0])
     handling = int(cursor.execute("SELECT handling FROM cars WHERE id = ?", (car_id,)).fetchone()[0])
     passability = int(cursor.execute("SELECT passability FROM cars WHERE id = ?", (car_id,)).fetchone()[0])
+
+    if identified_improvements is None:
+        identified_improvements = cursor.execute("SELECT * FROM users_cars WHERE (user_id, car_id) = (?, ?)",
+                                                 (user_id, car_id)).fetchone()[2: -2]
 
     characteristics = {
         'max_speed': max_speed,
@@ -52,7 +56,7 @@ def calculate_score(race_id, user_id, element_id, car_id, tires):
     # tires = ['soft', 100]
 
     improvements = cursor.execute("SELECT * FROM users_cars WHERE (user_id, car_id) = (?, ?)",
-                                  (user_id, car_id)).fetchone()[2:-1]
+                                  (user_id, car_id)).fetchone()[2:-2]
     driving_exp = cursor.execute("SELECT driving_exp FROM users_cars WHERE (user_id, car_id) = (?, ?)",
                                  (user_id, car_id)).fetchone()[0] / 10
     identified_improvements = []

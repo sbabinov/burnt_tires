@@ -158,9 +158,9 @@ def generate_car_state_picture(user_id, car_id, size):
 
     for part_index in range(len(body_parts)):
         part_state = data[part_index]
-        if part_state > 20:
-            part_state = part_state - 20
         if part_state < 90:
+            if part_state > 20:
+                part_state = part_state - 15
             part_image = \
                 Image.open(os.path.join(f'images/car_states/body/{body_parts[part_index]}.png')).convert(mode='RGBA')
             part_image.thumbnail((size, size))
@@ -364,14 +364,14 @@ def generate_card_picture(user_id, car_id, backside=False, path=None, tires=None
         idraw.text((130, 820), 'Состояние', font=characteristics_small_font)
         idraw.text((130, 860), 'автомобиля:', font=characteristics_small_font)
 
-        car_state_image = generate_car_state_picture(user_id, car_id, 220)
-        card_picture.alpha_composite(car_state_image, (330, 740))
+        car_state_image = generate_car_state_picture(user_id, car_id, 185)
+        card_picture.alpha_composite(car_state_image, (335, 760))
 
         # добавление привода
         drive_unit_type = 'rwd'
 
         drive_unit_image = Image.open('images/cars_parts/drive_unit/drive_unit.png').convert(mode='RGBA')
-        drive_unit_image.thumbnail((200, 200))
+        drive_unit_image.thumbnail((220, 220))
 
         card_picture.alpha_composite(drive_unit_image, (500, 650))
         idraw.text((565, 850), drive_unit_type.upper(), font=characteristics_big_font)

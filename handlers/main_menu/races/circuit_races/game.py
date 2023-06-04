@@ -9,7 +9,6 @@ from inline_keyboards import RaceInlineKeyboard
 from useful_function.generate_race_pictures import *
 from useful_function.generate_other_pictures import *
 
-
 conf_images = dict()
 race_images = dict()
 voting_images = dict()
@@ -247,7 +246,6 @@ async def show_race_members(user_id: int, race_id: int):
     #         await asyncio.sleep(4)
 
 
-
 permissions = dict()
 
 
@@ -408,6 +406,7 @@ current_tires_index = dict()
 async def choose_start_tires(user_id, race_id):
     global tires
     global current_tires_index
+
     user_cars = cursor.execute("SELECT car_1, car_2, car_3, car_4 FROM user_car_deck WHERE user_id = ?",
                                (user_id,)).fetchone()
 
@@ -416,21 +415,28 @@ async def choose_start_tires(user_id, race_id):
     tires[race_id][user_id] = {key: ['', 100] for key in user_cars}
     tires_types = list(tires_characteristics.keys())
 
+    index = 0
     for car_id in user_cars:
+        msg_to_delete = await bot.send_message(user_id, "⏳ Загрузка...")
+
         car_tires = cursor.execute("SELECT * FROM user_tires_amount WHERE (user_id, car_id) = (?, ?)",
                                    (user_id, car_id)).fetchone()[2:]
         inds = []
         for i in range(len(car_tires)):
             if car_tires[i] != 0:
                 inds.append(i)
+                generate_tires_for_race_choice_window(race_id, user_id, index, i, tires[race_id][user_id])
 
         ind = inds[0]
         current_tires_index[user_id] = [inds[0], len(inds), 0]
         tires[race_id][user_id][car_id] = [tires_types[inds[ind]], 100]
 
-        photo_path = generate_tires_for_race_choice_window(race_id, user_id, user_cars.index(car_id), inds[ind],
-                                                           tires[race_id][user_id])
+        # photo_path = generate_tires_for_race_choice_window(race_id, user_id, user_cars.index(car_id), inds[ind],
+        #                                                    tires[race_id][user_id])
+        photo_path = os.path.join(f'images/for_saves/races/'
+                                  f'{race_id}_{user_id}_{index}_{inds[ind]}_start-tires.png')
         photo = InputFile(photo_path)
+        await msg_to_delete.delete()
         msg = await bot.send_photo(user_id, photo, reply_markup=RaceInlineKeyboard.start_tires_choice_menu)
 
         for i in range(12000):
@@ -439,8 +445,10 @@ async def choose_start_tires(user_id, race_id):
 
                 tires[race_id][user_id][car_id] = [tires_types[inds[ind]], 100]
 
-                photo_path = generate_tires_for_race_choice_window(race_id, user_id, user_cars.index(car_id), inds[ind],
-                                                                   tires[race_id][user_id])
+                # photo_path = generate_tires_for_race_choice_window(race_id, user_id, user_cars.index(car_id), inds[ind],
+                #                                                    tires[race_id][user_id])
+                photo_path = os.path.join(f'images/for_saves/races/'
+                                          f'{race_id}_{user_id}_{index}_{inds[ind]}_start-tires.png')
                 photo = InputFile(photo_path)
                 media = InputMedia(media=photo)
 
@@ -449,10 +457,19 @@ async def choose_start_tires(user_id, race_id):
                 # msg = await bot.send_photo(user_id, photo, reply_markup=RaceInlineKeyboard.start_tires_choice_menu)
 
             elif current_tires_index[user_id][2] == 1:
+                for j in range(len(inds)):
+                    try:
+                        os.remove(os.path.join(f'images/for_saves/races/'
+                                               f'{race_id}_{user_id}_{index}_{inds[j]}_start-tires.png'))
+                    except Exception as e:
+                        print(e)
+
                 await msg.delete()
                 break
 
             await asyncio.sleep(0.1)
+
+        index += 1
 
 
 def generate_race_pictures(user_id, race_id):
@@ -475,7 +492,6 @@ def generate_race_pictures(user_id, race_id):
 #
 #     cursor.execute("INSERT INTO races VALUES (?, ?, ?, ?)", (race_id, 'circuit', members, 0))
 #     connection.commit()
-
 
 
 @dp.callback_query_handler(text_contains='подтверждение-гонки')

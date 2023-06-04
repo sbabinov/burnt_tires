@@ -8,10 +8,13 @@ from loader import dp, bot, update_current_message_id, update_service_data, get_
 from inline_keyboards import RaceInlineKeyboard
 from useful_function.generate_race_pictures import *
 from useful_function.generate_other_pictures import *
+from useful_function.randomizer import *
 
 overtakings = dict()
 overtaking_dices = dict()
 user_readiness = dict()
+user_events = dict()
+penalties = dict()
 
 
 async def waiting_players(user_id, race_id):
@@ -22,7 +25,212 @@ async def waiting_players(user_id, race_id):
     return True
 
 
-async def do_overtaking(race_id, user_id: int, data: dict, score: list):
+async def overtaking_events(race_id, data: dict, attack_power, defend_power, penalty):
+    global penalties
+
+    body_parts_rus = {
+        'front': 'передняя часть',
+        'rear': 'задняя часть',
+        'right_side': 'правая часть',
+        'left_side': 'левая часть'
+    }
+
+    attacker = list(data.keys())[0]
+    defender = list(data.keys())[1]
+
+    attack_event_chance = 1
+    defend_event_chance = 1
+
+    for i in range(attack_power):
+        attack_event_chance *= 1.5
+    for i in range(defend_power):
+        defend_event_chance *= 1.5
+
+    general_event_chance = int(attack_event_chance * defend_event_chance / 2) * 10
+    general_event_chance = 100
+    messages_to_delete = []
+    if get_result_by_chance(general_event_chance):
+        for user in attacker, defender:
+            damage = random.randint(5, 15)
+            if user == attacker:
+                damaged_part = random.choice(['front', 'left_side', 'right_side'])
+            else:
+                if damaged_part == 'front':
+                    damaged_part = 'rear'
+                elif damaged_part == 'left_side':
+                    damaged_part = 'right_side'
+                elif damaged_part == 'right_side':
+                    damaged_part = 'left_side'
+
+            if user == attacker:
+                texts = [
+                    "Эй, эй, аккуратнее при обгоне! Автомобиль будем чинить за свои деньги!",
+                    f"При атаке повредилась {body_parts_rus[damaged_part]}, не торопись в следующий раз!",
+                    "Настойчивость - это хорошо, но нужно знать меру! Два поломанных автомобиля того не стоят!"
+                ]
+            else:
+                texts = [
+                    f"Автомобиль повредился... Кажется, его {body_parts_rus[damaged_part]}...",
+                    "Столкновение с соперником! С тобой всё в порядке? Отлично...",
+                    "Упс... Кажется, после гонки придётся чинить автомобиль..."
+                ]
+
+            body_state = cursor.execute(f"SELECT {damaged_part} FROM cars_body_state WHERE (user_id, car_id) = (?, ?)",
+                                        (user, data[user])).fetchone()[0]
+            body_state -= damage
+
+            cursor.execute(f"UPDATE cars_body_state SET {damaged_part} = ? WHERE (user_id, car_id) = (?, ?)",
+                           (body_state, user, data[user]))
+            connection.commit()
+
+            text = random.choice(texts)
+            text_part = "⚙️ <b><i>Механик:</i></b>\n\n"
+            text = text_part + text
+
+            msg = await bot.send_message(user, text)
+            messages_to_delete.append({user: msg.message_id})
+
+        culprits = []
+        if attack_power != defend_power:
+            if attack_power > defend_power:
+                culprits.append(attacker)
+            else:
+                culprits.append(defender)
+        else:
+            culprits.append(attacker)
+            culprits.append(defender)
+
+        for culprit in culprits:
+            penalties[culprit] = penalty
+
+        users = list(user_readiness[race_id].keys())
+        for user in users:
+            if len(culprits) == 1:
+                username = cursor.execute("SELECT username FROM users WHERE id = ?", (user,)).fetchone()[0]
+                text = f"❗️ {username.capitalize()} получает штраф {penalty} очк. за столкновение"
+            else:
+                culprit_1 = culprits[0]
+                culprit_2 = culprits[1]
+
+                username_1 = cursor.execute("SELECT username FROM users WHERE id = ?", (culprit_1,)).fetchone()[0]
+                username_2 = cursor.execute("SELECT username FROM users WHERE id = ?", (culprit_2,)).fetchone()[0]
+
+                text = f"❗️ {username_1.capitalize()} и {username_2} получают штраф {penalty} очк. за столкновение"
+
+            msg = await bot.send_message(user, text)
+            messages_to_delete.append({user: msg.message_id})
+
+        await asyncio.sleep(3)
+        for msg in messages_to_delete:
+            user = list(msg.keys())[0]
+            await bot.delete_message(user, msg[user])
+
+        return penalty
+    return False
+
+
+async def get_random_event(user_id, cell_color, car_id):
+    car_brand = cursor.execute("SELECT car_brand FROM cars WHERE id = ?", (car_id,)).fetchone()[0]
+    car_brand = cars_brands[car_brand]
+
+    if cell_color == 2:
+        texts = [
+            "Фух! Ты довольно быстро справился с заносом, не потеряв много времени. Так держать!",
+            "Отлично, теперь все 4 колеса цепляются за трассу как надо.",
+            f"Осторожно, {car_brand} иногда заносит, аккуратно работай газом... Молодец, автомобиль выправился!",
+            "Ой-ой-ой, не спеши, занос всегда коварен!"
+        ]
+        numbers = [i / 100 for i in range(91, 98)]
+        event_bonus = random.choice(numbers)
+        text = random.choice(texts)
+    elif cell_color == 1:
+        texts = [
+            "Неудачный поворот... Постарайся скорее забыть об этом и продолжай сражаться.",
+            "У каждого бывают ошибки, не унывай! Главное - место на финише!",
+            f"Кажется, наш {car_brand} попал в занос... Повезло, что не улетели в отбойник.",
+            "Упс, неприятная ситуация... Не обращай внимания, сосредоточься на следующем повороте."
+        ]
+        numbers = [i / 100 for i in range(51, 61)]
+        event_bonus = random.choice(numbers)
+        text = random.choice(texts)
+    else:
+        numbers = [i for i in range(11, 22)]
+        event_bonus = random.choice(numbers)
+
+        body_parts = ['front', 'rear', 'right_side', 'left_side']
+        body_parts_rus = {
+            'front': 'передняя часть',
+            'rear': 'задняя часть',
+            'right_side': 'правая часть',
+            'left_side': 'левая часть'
+        }
+        damaged_body_part = random.choice(body_parts)
+
+        texts = [
+            "... слышишь меня? С тобой всё в порядке? Отлично... А вот автомобилю несладко пришлось...",
+            f"Аккуратнее, рядом отбойник... Кажется, у автомобиля повредилась {body_parts_rus[damaged_body_part]}...",
+            f"{body_parts_rus[damaged_body_part].capitalize()} автомобиля пострадала, нельзя допустить повторного "
+            f"столкновения.",
+            f"Автомобиль пока на ходу, но его {body_parts_rus[damaged_body_part]} не выглядит целой..."
+        ]
+
+        current_state = \
+            cursor.execute(f"SELECT {damaged_body_part} FROM cars_body_state WHERE (user_id, car_id) = (?, ?)",
+                           (user_id, car_id)).fetchone()[0]
+
+        if current_state > 22:
+            current_state -= int(event_bonus)
+
+        cursor.execute(f"UPDATE cars_body_state SET {damaged_body_part} = ? WHERE (user_id, car_id) = (?, ?)",
+                       (current_state, user_id, car_id))
+        connection.commit()
+
+        event_bonus /= 100
+        text = random.choice(texts)
+
+    text_part = "⚙️ <b><i>Механик:</i></b>\n\n"
+    text = text_part + text
+
+    msg = await bot.send_message(user_id, text)
+    await asyncio.sleep(3)
+    await msg.delete()
+
+    return event_bonus
+
+
+async def uncontrollable_skid(user_id: int, car_id: int):
+    driving_exp = cursor.execute("SELECT driving_exp FROM users_cars WHERE (user_id, car_id) = (?, ?)",
+                                 (user_id, car_id)).fetchone()[0] / 10
+    handling = calculate_characteristic_bar_length(car_id, 100, None, user_id)[2]
+
+    overall_handling = int(handling + driving_exp)
+
+    green_cells = overall_handling // 20
+    red_cells = 12 - overall_handling // 9
+    if red_cells > 4:
+        red_cells = 4
+    yellow_cells = 12 - green_cells - red_cells
+
+    cells = [red_cells, yellow_cells, green_cells]
+    hidden_menu, visible_menu = RaceInlineKeyboard.get_event_menu(cells)
+
+    photo = InputFile(os.path.join('images/races/events/uncontrollable_skid.jpg'))
+
+    msg = await bot.send_photo(user_id, photo, reply_markup=hidden_menu)
+    while user_events.get(user_id, -1) not in [0, 1, 2]:
+        await asyncio.sleep(0.1)
+
+    choosen_cell = user_events[user_id]
+    del user_events[user_id]
+    await msg.edit_reply_markup(reply_markup=visible_menu)
+    await asyncio.sleep(2)
+    event_bonus = await get_random_event(user_id, choosen_cell, car_id)
+    await msg.delete()
+
+    return event_bonus
+
+
+async def do_overtaking(race_id, user_id: int, data: dict, score: list, penalty: int):
     global overtakings
     global overtaking_dices
     global user_readiness
@@ -69,6 +277,7 @@ async def do_overtaking(race_id, user_id: int, data: dict, score: list):
     image = InputFile(image_path)
 
     msg = await bot.send_photo(user_id, image, caption=caption, reply_markup=inline_keyboard)
+    os.remove(image_path)
 
     if await waiting_players(user_id, race_id):
         while overtakings[attacker] is None:
@@ -119,17 +328,9 @@ async def do_overtaking(race_id, user_id: int, data: dict, score: list):
         attacker_dice = overtaking_dices[attacker]
         defender_dice = overtaking_dices[defender]
 
-    events_chances = {
-        1: 0.005,
-        2: 0.02,
-        3: 0.05,
-        4: 0.1
-    }
-
     attacker_agression = overtakings[attacker]
     defender_agression = overtakings[defender]
 
-    general_chance = events_chances[attacker_agression] + events_chances[defender_agression]
     dice_values = {
         1: (2, 6, 3, 5, 4),
         2: (3, 1, 4, 6, 5),
@@ -177,6 +378,11 @@ async def do_overtaking(race_id, user_id: int, data: dict, score: list):
         await asyncio.sleep(5)
         await msg.delete()
 
+        user_readiness[race_id][user_id] = 0
+        if user_id == attacker:
+            await overtaking_events(race_id, data, attacker_agression - 1, defender_agression - 1, penalty)
+        await waiting_players(user_id, race_id)
+
         winner = attacker if attacker_dice in win_dice_values else defender
         return winner
 
@@ -188,6 +394,17 @@ async def choose_overtaking_agression(call: CallbackQuery):
     user_id = call.from_user.id
     overtaking_agression = int(call.data.split('_')[1])
 
-    # if overtaking_type == 'атака':
     if overtakings[user_id] is None:
         overtakings[user_id] = overtaking_agression
+
+
+@dp.callback_query_handler(text_contains='трасса-событ_')
+async def play_race_event(call: CallbackQuery):
+    global user_events
+
+    user_id = call.from_user.id
+    event = call.data.split('_')[1]
+    if event == 'занос':
+        cell = call.data.split('_')[2]
+        if user_events.get(user_id, -1) not in [0, 1, 2]:
+            user_events[user_id] = int(cell)
